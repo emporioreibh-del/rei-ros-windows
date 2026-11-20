@@ -25,6 +25,6 @@
     "files": ["main.js", "preload.js", "build/icon.png"],
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
     "nsis": { "oneClick": true, "perMachine": false, "createDesktopShortcut": true, "shortcutName": "ROS do Rei", "runAfterFinish": true },
-    "publish": [{ "provider": "github", "owner": "emporioreibh-del", "repo": "rei-ros-windows" }]
+    "publish": [{ "provider": "github", "owner": "emporioreibh-del", "repo": "rei-ros-windows", "releaseType": "release" }]
   }
 }
