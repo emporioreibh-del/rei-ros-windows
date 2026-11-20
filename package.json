@@ -1,0 +1,30 @@
+{
+  "name": "rei-ros-windows",
+  "productName": "ROS do Rei",
+  "version": "1.0.0",
+  "description": "ROS do Rei para o computador do balcão: o mesmo ROS, imprimindo sozinho e sempre acordado.",
+  "main": "main.js",
+  "author": "Rei Bebidas Delivery",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "br.com.deliverydorei.ros",
+    "productName": "ROS do Rei",
+    "directories": { "buildResources": "build" },
+    "files": ["main.js", "preload.js", "build/icon.png"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
+    "nsis": { "oneClick": true, "perMachine": false, "createDesktopShortcut": true, "shortcutName": "ROS do Rei", "runAfterFinish": true },
+    "publish": [{ "provider": "github", "owner": "emporioreibh-del", "repo": "rei-ros-windows" }]
+  }
+}
