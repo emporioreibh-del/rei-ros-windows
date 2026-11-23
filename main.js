@@ -47,16 +47,24 @@ function criarJanela() {
   janela.on('close', (e) => { if (!saindo) { e.preventDefault(); janela.hide(); } });
 }
 
-function criarTray() {
-  tray = new Tray(icone().resize({ width: 16, height: 16 }));
-  tray.setToolTip('ROS do Rei — imprimindo');
+let atualizacaoPronta = null; // 23/11 — versão nova já baixada, esperando instalar
+function menuTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Abrir o ROS', click: mostrar },
-    { label: 'Recarregar', click: () => janela?.loadURL(URL_ROS) },
+    { label: 'Recarregar', click: () => janela?.webContents.reload() },
+    ...(atualizacaoPronta ? [{ label: `⬆️ Instalar a versão ${atualizacaoPronta} agora (reabre sozinho)`, click: instalarAgora }] : []),
     { type: 'separator' },
     { label: `Versão ${app.getVersion()}`, enabled: false },
     { label: 'Sair (para de imprimir)', click: () => { saindo = true; app.quit(); } },
   ]));
+}
+function instalarAgora() {
+  try { saindo = true; require('electron-updater').autoUpdater.quitAndInstall(true, true); } catch { saindo = false; }
+}
+function criarTray() {
+  tray = new Tray(icone().resize({ width: 16, height: 16 }));
+  tray.setToolTip('ROS do Rei — imprimindo');
+  menuTray();
   tray.on('click', mostrar);
 }
 
@@ -100,6 +108,13 @@ app.whenReady().then(() => {
     try {
       const { autoUpdater } = require('electron-updater');
       autoUpdater.autoInstallOnAppQuit = true;
+      // 23/11 (Livia: o ícone novo não chegou) — o X só esconde, então "instalar ao fechar" quase nunca acontecia.
+      // Agora: versão baixada aparece no menu do ícone (perto do relógio) e é instalada sozinha de madrugada (4h).
+      autoUpdater.on('update-downloaded', (info) => {
+        atualizacaoPronta = info?.version ?? 'nova'; menuTray();
+        try { new Notification({ title: 'ROS do Rei', body: `Versão ${atualizacaoPronta} pronta. Clique com o botão direito no ícone perto do relógio › Instalar agora.`, icon: icone() }).show(); } catch { /* sem aviso */ }
+      });
+      setInterval(() => { if (atualizacaoPronta && new Date().getHours() === 4) instalarAgora(); }, 10 * 60 * 1000);
       autoUpdater.checkForUpdatesAndNotify().catch(() => {});
       setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
     } catch { /* sem atualizador, segue */ }

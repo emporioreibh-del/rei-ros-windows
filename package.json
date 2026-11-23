@@ -1,7 +1,7 @@
 {
   "name": "rei-ros-windows",
   "productName": "ROS do Rei",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ROS do Rei para o computador do balcão: o mesmo ROS, imprimindo sozinho e sempre acordado.",
   "main": "main.js",
   "author": "Rei Bebidas Delivery",
