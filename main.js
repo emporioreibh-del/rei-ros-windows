@@ -38,6 +38,11 @@ function criarJanela() {
   // Sem internet: tenta de novo a cada 15 s (o ROS volta sozinho quando a internet voltar).
   janela.webContents.on('did-fail-load', (_e, codigo) => { if (codigo !== -3) setTimeout(() => janela?.loadURL(URL_ROS), 15_000); });
   janela.webContents.on('render-process-gone', () => setTimeout(() => janela?.loadURL(URL_ROS), 2_000));
+  // 23/11 (Livia) — F5 e Ctrl+R recarregam a tela, como no navegador (o menu escondido não fazia isso).
+  janela.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    if (input.key === 'F5' || ((input.control || input.meta) && String(input.key).toLowerCase() === 'r')) { e.preventDefault(); janela.webContents.reload(); }
+  });
   // Fechar no X = esconder. Sair de verdade só pelo ícone perto do relógio › Sair.
   janela.on('close', (e) => { if (!saindo) { e.preventDefault(); janela.hide(); } });
 }
