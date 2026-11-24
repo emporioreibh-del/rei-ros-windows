@@ -10,6 +10,7 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, shell, nativeImag
 const path = require('node:path');
 
 const URL_ROS = 'https://ros.deliverydorei.com.br/pedidos';
+const URL_IMPRESSORA = 'https://ros.deliverydorei.com.br/impressora';   // 23/11 (1.0.4) — a impressora escondida
 const HOST_ROS = 'ros.deliverydorei.com.br';
 // SEGURANÇA: só o endereço EXATO do ROS (https) abre dentro do programa e enxerga window.rosDesktop.
 const ehRos = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && x.hostname === HOST_ROS; } catch { return false; } };
@@ -19,6 +20,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 let janela = null; let tray = null; let saindo = false;
+let impressora = null; let batidaEm = 0; let carregouEm = 0; let recarregouEm = 0; let ultimaComanda = null; let pedeLogin = false;
 const icone = () => nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
 
 function mostrar() { if (!janela) return; if (janela.isMinimized()) janela.restore(); janela.show(); janela.focus(); }
@@ -47,6 +49,59 @@ function criarJanela() {
   janela.on('close', (e) => { if (!saindo) { e.preventDefault(); janela.hide(); } });
 }
 
+// ── 23/11 (1.0.4) — IMPRESSORA ESCONDIDA (Livia 21h07, opção A) ──────────────────────────────────────────
+// Uma 2ª janela, invisível e muda, abre /impressora (só o sino, que reserva e imprime as comandas). A equipe pode deslogar,
+// trocar de tela ou a tela travar: a comanda sai do mesmo jeito. Ela avisa "estou viva" (ros:batida) a cada volta do laço de
+// impressão; parada 90 s → recarrega (no máximo 1× a cada 3 min). A tela da equipe continua imprimindo como reserva: a reserva
+// "quem pegou primeiro" do motor impede comanda dobrada.
+function criarImpressora() {
+  impressora = new BrowserWindow({
+    show: false, width: 900, height: 700, title: 'ROS do Rei — impressora',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
+  });
+  impressora.webContents.setAudioMuted(true);
+  impressora.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  impressora.webContents.on('will-navigate', (e, url) => { if (!ehRos(url)) e.preventDefault(); });
+  impressora.webContents.on('did-navigate', (_e, url) => { pedeLogin = /\/login(\b|\/|$)/.test(url); atualizarTooltip(); });
+  impressora.webContents.on('did-fail-load', (_e, codigo) => { if (codigo !== -3) setTimeout(() => recarregarImpressora('sem internet'), 15_000); });
+  impressora.webContents.on('render-process-gone', () => setTimeout(() => recarregarImpressora('travou'), 2_000));
+  impressora.on('closed', () => { impressora = null; if (!saindo) setTimeout(criarImpressora, 5_000); });
+  carregouEm = Date.now();
+  impressora.loadURL(URL_IMPRESSORA);
+}
+function recarregarImpressora(_motivo) {
+  if (!impressora || impressora.isDestroyed()) return;
+  recarregouEm = Date.now(); carregouEm = Date.now();
+  impressora.loadURL(URL_IMPRESSORA);
+}
+const hhmm = (d) => d ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null;
+function impressoraViva() { return Date.now() - batidaEm < 90_000; }
+function atualizarTooltip() {
+  if (!tray) return;
+  const t = pedeLogin ? '⚠️ impressora: faça login no ROS'
+    : impressoraViva() ? `🖨️ imprimindo${ultimaComanda ? ` · última comanda ${hhmm(ultimaComanda)}` : ''}`
+    : '⏳ impressora iniciando…';
+  tray.setToolTip(`ROS do Rei — ${t}`);
+  menuTray();
+}
+function vigiarImpressora() {
+  setInterval(() => {
+    if (saindo) return;
+    if (!impressora || impressora.isDestroyed()) { criarImpressora(); return; }
+    const parada = Date.now() - Math.max(batidaEm, carregouEm) > 90_000;
+    if (parada && !pedeLogin && Date.now() - recarregouEm > 3 * 60_000) recarregarImpressora('parada');
+    if (pedeLogin && Date.now() - recarregouEm > 3 * 60_000) recarregarImpressora('login');   // logou na tela da equipe? tenta de novo
+    atualizarTooltip();
+  }, 30_000);
+}
+ipcMain.on('ros:papel', (e) => { e.returnValue = impressora && !impressora.isDestroyed() && e.sender === impressora.webContents ? 'impressora' : 'janela'; });
+ipcMain.on('ros:batida', (e, o) => {
+  if (!impressora || impressora.isDestroyed() || e.sender !== impressora.webContents) return;
+  batidaEm = Date.now(); pedeLogin = false;
+  if (o && o.imprimiu) ultimaComanda = new Date();
+  atualizarTooltip();
+});
+
 let atualizacaoPronta = null; // 23/11 — versão nova já baixada, esperando instalar
 function menuTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -54,6 +109,8 @@ function menuTray() {
     { label: 'Recarregar', click: () => janela?.webContents.reload() },
     ...(atualizacaoPronta ? [{ label: `⬆️ Instalar a versão ${atualizacaoPronta} agora (reabre sozinho)`, click: instalarAgora }] : []),
     { type: 'separator' },
+    { label: pedeLogin ? '⚠️ Impressora: faça login no ROS' : impressoraViva() ? `🖨️ Impressora ligada${ultimaComanda ? ` · última ${hhmm(ultimaComanda)}` : ''}` : '⏳ Impressora iniciando…', enabled: false },
+    { label: 'Reiniciar a impressora', click: () => recarregarImpressora('menu') },
     { label: `Versão ${app.getVersion()}`, enabled: false },
     { label: 'Sair (para de imprimir)', click: () => { saindo = true; app.quit(); } },
   ]));
@@ -63,7 +120,7 @@ function instalarAgora() {
 }
 function criarTray() {
   tray = new Tray(icone().resize({ width: 16, height: 16 }));
-  tray.setToolTip('ROS do Rei — imprimindo');
+  tray.setToolTip('ROS do Rei — impressora iniciando…');
   menuTray();
   tray.on('click', mostrar);
 }
@@ -86,10 +143,16 @@ async function imprimir({ html, larguraMm, alturaMm, impressora }) {
   finally { setTimeout(() => { if (!folha.isDestroyed()) folha.destroy(); }, 3_000); }
 }
 ipcMain.on('ros:versao', (e) => { e.returnValue = app.getVersion(); });
-ipcMain.handle('ros:imprimir', (e, o) => (ehRos(e.senderFrame?.url ?? '') ? imprimir(o ?? {}) : { ok: false, erro: 'origem não autorizada' }));
+ipcMain.handle('ros:imprimir', async (e, o) => {
+  if (!ehRos(e.senderFrame?.url ?? '')) return { ok: false, erro: 'origem não autorizada' };
+  const r = await imprimir(o ?? {});
+  if (r.ok) { ultimaComanda = new Date(); atualizarTooltip(); }
+  return r;
+});
 ipcMain.handle('ros:impressoras', async (e) => !ehRos(e.senderFrame?.url ?? '') ? [] : (await janela.webContents.getPrintersAsync()).map((p) => ({ nome: p.name, padrao: !!p.isDefault })));
 ipcMain.on('ros:avisar', (e, o) => {
   if (!ehRos(e.senderFrame?.url ?? '')) return;
+  if (impressora && !impressora.isDestroyed() && e.sender === impressora.webContents) return;   // a escondida não avisa
   try { if (Notification.isSupported()) new Notification({ title: String(o?.titulo ?? 'ROS do Rei'), body: String(o?.texto ?? ''), icon: icone() }).show(); } catch { /* sem aviso, segue */ }
   if (janela && !janela.isFocused()) { mostrar(); janela.flashFrame(true); }
 });
@@ -103,6 +166,8 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((wc, _perm, ok) => ok(ehRos(wc.getURL())));
   session.defaultSession.setPermissionCheckHandler((wc) => !!wc && ehRos(wc.getURL()));
   criarJanela(); criarTray();
+  setTimeout(criarImpressora, 8_000);   // 23/11 (1.0.4) — depois da tela da equipe (o login dela vale para as duas)
+  vigiarImpressora();
   // Atualização sozinha: baixa a versão nova em segundo plano e instala na próxima vez que o programa abrir.
   if (app.isPackaged) {
     try {
@@ -120,5 +185,6 @@ app.whenReady().then(() => {
     } catch { /* sem atualizador, segue */ }
   }
 });
+app.on('before-quit', () => { saindo = true; });
 // A janela nunca é destruída (o X só esconde); o programa fecha só pelo menu do ícone › Sair.
 app.on('window-all-closed', () => { if (saindo) app.quit(); });
